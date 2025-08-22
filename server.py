@@ -10,7 +10,7 @@ mcp = FastMCP(name="code-runner", instructions="Codr Runner MCP Server")
 system_args: dict[str] = dict()
 
 
-class ExecuteException(BaseException):
+class ExecuteException(Exception):
     pass
 
 
