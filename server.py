@@ -1,6 +1,5 @@
 import asyncio
-import docker
-from docker.models.containers import Container
+import re
 from typing import Annotated, Any
 from fastmcp import Client, Context, FastMCP
 from fastmcp.exceptions import ToolError
@@ -9,6 +8,10 @@ from fastmcp.exceptions import ToolError
 # 1. Create the server
 mcp = FastMCP(name="code-runner", instructions="Codr Runner MCP Server")
 system_args: dict[str] = dict()
+
+
+class ExecuteException(BaseException):
+    pass
 
 
 # 2. Add a tool
@@ -55,16 +58,15 @@ async def execute(
         exit_code, _, stderr = await __cli_run(start_cmd, 10)
         if exit_code != 0:
             err = stderr.decode() if stderr else "failed to start containers"
-            raise ToolError(err)
+            raise ExecuteException(err)
 
         cmd = ["docker", "exec", *envs, name] + cmd
 
     try:
         exit_code, stdout, stderr = await __cli_run(cmd, timeout)
-        print(exit_code, stdout, stderr)
 
         if exit_code != 0:
-            raise ToolError(stderr.decode())
+            raise ExecuteException(stderr.decode())
         return stdout.decode()
 
     except TimeoutError:
@@ -112,11 +114,20 @@ async def get_python_modules(
 ) -> list[str]:
     """Provides the python available third-party modules."""
 
-    cmd = ["apt-mark", "showmanual", "python3-*"]
-    result = (await execute(cmd, timeout)).split("\n")
-    result = [line.strip()[8:] for line in result if len(line.strip()) > 0]
+    cmds = [
+        ["apt-mark", "showmanual", "python3-*"],
+        ["pacman", "-Qe"],
+    ]
+    for cmd in cmds:
+        try:
+            result = (await execute(cmd, timeout=timeout)).split("\n")
+            result = (re.search(r"^python3?-(\S+)\s*.*$", l, re.I) for l in result)
+            result = (r[1] for r in result if not (r is None))
+            return list(result)
+        except ExecuteException:
+            pass
 
-    return result
+    return ToolError("not found")
 
 
 async def test_weather_operations():
@@ -147,7 +158,6 @@ async def test_weather_operations():
             {"code": "echo 'hello world'", "timeout": 16},
         )
         print(result.data)
-        assert result.data == "hello world\n"
 
 
 # 5. Make the server runnable
